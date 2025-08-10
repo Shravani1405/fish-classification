@@ -46,7 +46,6 @@ except Exception:
 import streamlit as st
 import numpy as np
 from PIL import Image
-import tensorflow as tf
 
 # Load TFLite model
 @st.cache_resource

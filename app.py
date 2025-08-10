@@ -1,99 +1,114 @@
-# app.py
+
 import streamlit as st
-import tensorflow as tf
 import numpy as np
-from PIL import Image
-import io
+import tensorflow as tf
+from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing import image
+import cv2
+import tempfile
+import os
 
-# ==============================
-# 1. Page Configuration
-# ==============================
-st.set_page_config(
-    page_title="Multiclass Fish Image Classification",
-    page_icon="🐟",
-    layout="centered"
-)
+# -------------------
+# App Configuration
+# -------------------
+st.set_page_config(page_title="Brain Tumor MRI Classifier", page_icon="🧠", layout="centered")
 
-# ==============================
-# 2. Load Model
-# ==============================
+# -------------------
+# Load Model
+# -------------------
 @st.cache_resource
-def load_model():
-    model_path = "best_fish_model.h5"  # Ensure this file is in same folder as app.py
-    model = tf.keras.models.load_model(model_path)
+def load_trained_model():
+    model_path = "brain_tumor_model.h5"  # Place your trained model in same folder
+    model = load_model(model_path)
     return model
 
-model = load_model()
+model = load_trained_model()
 
-# ==============================
-# 3. Class Labels
-# ==============================
-# Replace with your dataset's actual class names in correct order
-CLASS_NAMES = [
-    "class_1", "class_2", "class_3", "class_4", "class_5"
-    # Example: "Salmon", "Tuna", "Catfish", ...
-]
-
-# ==============================
-# 4. Helper Functions
-# ==============================
-def preprocess_image(img: Image.Image):
-    img = img.resize((224, 224))  # same as training size
-    img_array = np.array(img) / 255.0
+# -------------------
+# Preprocessing Function
+# -------------------
+def preprocess_image(img_path, target_size=(224, 224)):
+    img = image.load_img(img_path, target_size=target_size)
+    img_array = image.img_to_array(img)
     img_array = np.expand_dims(img_array, axis=0)
+    img_array = img_array / 255.0  # normalize
     return img_array
 
-def predict_image(img: Image.Image):
-    processed_img = preprocess_image(img)
-    predictions = model.predict(processed_img)
-    predicted_index = np.argmax(predictions, axis=1)[0]
-    confidence_scores = predictions[0]
-    return predicted_index, confidence_scores
+# -------------------
+# Prediction Function
+# -------------------
+def predict_image(model, img_array):
+    predictions = model.predict(img_array)
+    class_index = np.argmax(predictions[0])
+    confidence = predictions[0][class_index]
+    return class_index, confidence, predictions[0]
 
-# ==============================
-# 5. UI - Title & Info
-# ==============================
-st.title("🐟 Multiclass Fish Image Classification")
-st.markdown("""
-### Project Overview
-This application classifies fish images into multiple categories using a deep learning model (EfficientNetB4).  
-The model was trained with transfer learning and fine-tuning on a custom fish dataset.
-""")
+# -------------------
+# Class Labels (update these as per your dataset)
+# -------------------
+CLASS_NAMES = ["Glioma", "Meningioma", "No Tumor", "Pituitary"]
 
-st.info("Upload an image of a fish and get its predicted category with confidence scores.")
+# -------------------
+# Streamlit UI
+# -------------------
+st.title("🧠 Brain Tumor MRI Classification")
+st.write("Upload an MRI image to classify it into one of the tumor categories.")
 
-# ==============================
-# 6. File Uploader
-# ==============================
-uploaded_file = st.file_uploader("Upload a fish image", type=["jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader("Choose an MRI image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    try:
-        image = Image.open(uploaded_file).convert("RGB")
-    except Exception as e:
-        st.error(f"Error loading image: {e}")
-        st.stop()
+    # Save the uploaded file temporarily
+    temp_file = tempfile.NamedTemporaryFile(delete=False)
+    temp_file.write(uploaded_file.read())
 
-    st.image(image, caption="Uploaded Image", use_column_width=True)
+    # Display image
+    st.image(temp_file.name, caption="Uploaded MRI Image", use_column_width=True)
 
-    # Prediction
-    with st.spinner("Predicting..."):
-        pred_index, confidence_scores = predict_image(image)
+    # Preprocess & Predict
+    with st.spinner("Classifying..."):
+        img_array = preprocess_image(temp_file.name)
+        class_index, confidence, all_confidences = predict_image(model, img_array)
 
-    st.success(f"**Predicted Class:** {CLASS_NAMES[pred_index]}")
-    
-    # Show confidence scores
-    st.subheader("Confidence Scores")
-    for i, score in enumerate(confidence_scores):
+    # Show Results
+    st.success(f"Prediction: **{CLASS_NAMES[class_index]}**")
+    st.info(f"Confidence: **{confidence*100:.2f}%**")
+
+    # Show all class probabilities
+    st.subheader("Class Probabilities")
+    for i, score in enumerate(all_confidences):
         st.write(f"{CLASS_NAMES[i]}: {score*100:.2f}%")
 
-# ==============================
-# 7. Footer
-# ==============================
-st.markdown("""
----
-**Skills Used:** Deep Learning, Python, TensorFlow/Keras, Transfer Learning, Data Augmentation, Model Deployment with Streamlit.  
-**Author:** Your Name  
-**Domain:** Image Classification  
-""")
+    # Optional: Grad-CAM (if you want explainability)
+    if st.checkbox("Show Grad-CAM Heatmap"):
+        # Grad-CAM implementation
+        img = cv2.imread(temp_file.name)
+        img_resized = cv2.resize(img, (224, 224))
+        grad_model = tf.keras.models.Model(
+            [model.inputs],
+            [model.get_layer(index=-3).output, model.output]
+        )
+        with tf.GradientTape() as tape:
+            conv_outputs, predictions = grad_model(np.array([img_resized / 255.0]))
+            loss = predictions[:, class_index]
+        grads = tape.gradient(loss, conv_outputs)[0]
+        pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+        conv_outputs = conv_outputs[0]
+        heatmap = tf.reduce_mean(tf.multiply(pooled_grads, conv_outputs), axis=-1)
+
+        heatmap = np.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
+        heatmap = heatmap.numpy()
+
+        # Overlay heatmap
+        heatmap_resized = cv2.resize(heatmap, (img.shape[1], img.shape[0]))
+        heatmap_colored = cv2.applyColorMap(np.uint8(255 * heatmap_resized), cv2.COLORMAP_JET)
+        overlay = cv2.addWeighted(img, 0.6, heatmap_colored, 0.4, 0)
+
+        st.image(overlay, caption="Grad-CAM Heatmap", use_column_width=True)
+
+    # Clean up
+    os.unlink(temp_file.name)
+
+else:
+    st.warning("Please upload an MRI image to proceed.")
+
 

@@ -1,68 +1,99 @@
+# app.py
 import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
-import json
+import io
 
-# -----------------------
-# 1. App Title
-# -----------------------
-st.set_page_config(page_title="Fish Classification App", layout="centered")
-st.title("Fish Classification with EfficientNetB4")
-st.write("Upload a fish image, and the model will classify it into the correct category.")
+# ==============================
+# 1. Page Configuration
+# ==============================
+st.set_page_config(
+    page_title="Multiclass Fish Image Classification",
+    page_icon="🐟",
+    layout="centered"
+)
 
-# -----------------------
-# 2. Load Model and Classes
-# -----------------------
+# ==============================
+# 2. Load Model
+# ==============================
 @st.cache_resource
 def load_model():
-    model = tf.keras.models.load_model("best_fish_model.h5")  # change to your saved model file
+    model_path = "best_fish_model.h5"  # Ensure this file is in same folder as app.py
+    model = tf.keras.models.load_model(model_path)
     return model
 
 model = load_model()
 
-# Load class names (ensure you save a class_indices.json after training)
-with open("class_indices.json", "r") as f:
-    class_indices = json.load(f)
+# ==============================
+# 3. Class Labels
+# ==============================
+# Replace with your dataset's actual class names in correct order
+CLASS_NAMES = [
+    "class_1", "class_2", "class_3", "class_4", "class_5"
+    # Example: "Salmon", "Tuna", "Catfish", ...
+]
 
-# Reverse the dictionary to map index → class name
-class_names = {v: k for k, v in class_indices.items()}
-
-# -----------------------
-# 3. Preprocessing Function
-# -----------------------
-def preprocess_image(image):
-    img = image.resize((380, 380))  # EfficientNetB4 input size
-    img_array = tf.keras.preprocessing.image.img_to_array(img)
+# ==============================
+# 4. Helper Functions
+# ==============================
+def preprocess_image(img: Image.Image):
+    img = img.resize((224, 224))  # same as training size
+    img_array = np.array(img) / 255.0
     img_array = np.expand_dims(img_array, axis=0)
-    img_array = img_array / 255.0  # Rescale
     return img_array
 
-# -----------------------
-# 4. File Uploader
-# -----------------------
+def predict_image(img: Image.Image):
+    processed_img = preprocess_image(img)
+    predictions = model.predict(processed_img)
+    predicted_index = np.argmax(predictions, axis=1)[0]
+    confidence_scores = predictions[0]
+    return predicted_index, confidence_scores
+
+# ==============================
+# 5. UI - Title & Info
+# ==============================
+st.title("🐟 Multiclass Fish Image Classification")
+st.markdown("""
+### Project Overview
+This application classifies fish images into multiple categories using a deep learning model (EfficientNetB4).  
+The model was trained with transfer learning and fine-tuning on a custom fish dataset.
+""")
+
+st.info("Upload an image of a fish and get its predicted category with confidence scores.")
+
+# ==============================
+# 6. File Uploader
+# ==============================
 uploaded_file = st.file_uploader("Upload a fish image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
+    try:
+        image = Image.open(uploaded_file).convert("RGB")
+    except Exception as e:
+        st.error(f"Error loading image: {e}")
+        st.stop()
+
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Preprocess and predict
-    st.write("Processing and predicting...")
-    processed_image = preprocess_image(image)
-    predictions = model.predict(processed_image)[0]
+    # Prediction
+    with st.spinner("Predicting..."):
+        pred_index, confidence_scores = predict_image(image)
 
-    # Get top prediction
-    top_index = np.argmax(predictions)
-    predicted_class = class_names[top_index]
-    confidence = predictions[top_index] * 100
+    st.success(f"**Predicted Class:** {CLASS_NAMES[pred_index]}")
+    
+    # Show confidence scores
+    st.subheader("Confidence Scores")
+    for i, score in enumerate(confidence_scores):
+        st.write(f"{CLASS_NAMES[i]}: {score*100:.2f}%")
 
-    # -----------------------
-    # 5. Show Results
-    # -----------------------
-    st.markdown(f"### Predicted Class: **{predicted_class}**")
-    st.markdown(f"**Confidence:** {confidence:.2f}%")
+# ==============================
+# 7. Footer
+# ==============================
+st.markdown("""
+---
+**Skills Used:** Deep Learning, Python, TensorFlow/Keras, Transfer Learning, Data Augmentation, Model Deployment with Streamlit.  
+**Author:** Your Name  
+**Domain:** Image Classification  
+""")
 
-    # Confidence bar chart
-    st.subheader("Confidence Scores for All Classes")
-    st.bar_chart(predictions)

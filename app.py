@@ -43,52 +43,6 @@ except Exception:
         except Exception:
             tflite_runtime = None
 
-import streamlit as st
-import numpy as np
-from PIL import Image
-
-# Load TFLite model
-@st.cache_resource
-def load_model():
-    interpreter = tf.lite.Interpreter(model_path="fish_model.tflite")
-    interpreter.allocate_tensors()
-    return interpreter
-
-interpreter = load_model()
-
-# Class names
-CLASS_NAMES = ["Salmon", "Tuna", "Trout", "Mackerel", "Catfish"]
-
-# Preprocess function
-def preprocess_image(image):
-    img = image.resize((224, 224))
-    img = np.array(img) / 255.0
-    img = np.expand_dims(img, axis=0).astype(np.float32)
-    return img
-
-# Prediction function
-def predict(image):
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
-    interpreter.set_tensor(input_details[0]['index'], image)
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])
-    return output_data
-
-# Streamlit UI
-st.title("🐟 Fish Classification App")
-uploaded_file = st.file_uploader("Upload a fish image...", type=["jpg", "jpeg", "png"])
-
-if uploaded_file:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="Uploaded Image", use_container_width=True)
-
-    img_array = preprocess_image(image)
-    preds = predict(img_array)
-    class_index = np.argmax(preds)
-    confidence = np.max(preds) * 100
-
-    st.success(f"Prediction: {CLASS_NAMES[class_index]} ({confidence:.2f}%)")
 
 # -----------------------
 # Helper: load class names
